@@ -1,0 +1,40 @@
+services:
+  app:
+    build: .
+    init: true
+    env_file: .env
+    environment:
+      DESIGNMD_EGRESS_PROXY: http://egress:8081
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [isolated]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 3g
+    pids_limit: 256
+    cpus: 2
+    shm_size: 512m
+    volumes:
+      - artifacts:/app/output
+      - state:/app/.designmd-state
+  egress:
+    image: node:22-bookworm-slim
+    user: "1000:1000"
+    command: ["node","/proxy/egress-proxy.mjs"]
+    volumes:
+      - ./security/egress-proxy.mjs:/proxy/egress-proxy.mjs:ro
+    networks: [isolated, outbound]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 64
+networks:
+  isolated:
+    internal: true
+  outbound: {}
+volumes:
+  artifacts: {}
+  state: {}
