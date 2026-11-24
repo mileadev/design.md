@@ -5,6 +5,7 @@ import { validateDesignMd, type ValidationResult } from './validate';
 
 //  Helpers 
 
+function safeColor(value: string): string { return /^#[0-9a-f]{3,8}$/i.test(value) ? value : 'transparent'; }
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -516,7 +517,7 @@ ${(tokens as unknown as Record<string, unknown>).darkMode && ((tokens as unknown
   }
 
   function renderVarRow(v: { name: string; lightValue: string; darkValue: string }): string {
-    return `      <tr><td style="font-family:monospace;font-size:0.75rem">${esc(v.name)}</td><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin-right:4px;background:${v.lightValue};border:1px solid var(--border)"></span>${esc(v.lightValue)}</td><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin-right:4px;background:${v.darkValue};border:1px solid var(--border)"></span>${esc(v.darkValue)}</td></tr>`;
+    return `      <tr><td style="font-family:monospace;font-size:0.75rem">${esc(v.name)}</td><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin-right:4px;background:${safeColor(v.lightValue)};border:1px solid var(--border)"></span>${esc(v.lightValue)}</td><td><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin-right:4px;background:${safeColor(v.darkValue)};border:1px solid var(--border)"></span>${esc(v.darkValue)}</td></tr>`;
   }
 
   const groupsHtml = groupOrder
@@ -577,22 +578,6 @@ ${designMdContent ? `
 <div class="card">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;margin-bottom:1rem;">
     <h2 style="margin-bottom:0;">📄 DESIGN.md</h2>
-    <div class="md-actions">
-      <button class="btn-primary" onclick="(() => {
-        const blob = new Blob([document.getElementById('md-content').textContent], {type:'text/markdown'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'DESIGN.md';
-        a.click();
-      })()">⬇ Download MD File</button>
-      <button class="btn-secondary" onclick="(() => {
-        const text = document.getElementById('md-content').textContent;
-        navigator.clipboard.writeText(text).then(() => {
-          this.innerHTML = '✅ Copied!';
-          setTimeout(() => { this.innerHTML = '📋 Copy All Content'; }, 2000);
-        });
-      })()">📋 Copy All Content</button>
-    </div>
   </div>
   <div class="md-preview">${esc(designMdContent)}</div>
   <pre id="md-content" style="display:none">${esc(designMdContent)}</pre>
