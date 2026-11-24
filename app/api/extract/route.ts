@@ -18,8 +18,11 @@ import { generateAndWriteTailwindCss } from "@/lib/engine/tailwind-emit";
 import { stripDarkScreenshotsOnDisk } from "@/lib/engine/strip-dark-screenshots";
 import { applyButtonClustering } from "@/lib/engine/button-cluster";
 import { generateAndWriteShadcnCss } from "@/lib/engine/shadcn-emit";
-import { checkAndRecordRateLimit, getClientIp } from "@/lib/rate-limit";
-import { normalizeUrl } from "@/lib/url-resolver";
+import { authorized, allowedOrigin, requestOwner } from "@/lib/security/auth";
+import { parseExtraction, readSmallJson } from "@/lib/security/input";
+import { admit } from "@/lib/security/jobs";
+import { withBrowserSignal } from "@/lib/engine/safe-browser";
+
 import type { ColorToken, TypographyLevel } from "@/lib/engine/types";
 
 // Note on the Turbopack NFT trace warning at build time: these engine
@@ -91,59 +94,24 @@ interface StageEvent {
   detail?: Record<string, unknown>;
 }
 
-interface ExtractRequest {
-  url: string;
-  maxPages?: number;
-  noInteraction?: boolean;
-  noDarkMode?: boolean;
-  // When true (default), runs preview-gen + proof.ts + report-gen after
-  // extract finishes so the result panel can embed the visual artifacts.
-  withPhase3?: boolean;
-}
-
-function slugForOutput(url: string): string {
-  return new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "-");
-}
-
 export async function POST(req: Request) {
-  let body: ExtractRequest;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Body must be JSON." }, { status: 400 });
-  }
-
-  const url = normalizeUrl(body.url ?? "");
-  if (!url) {
-    return Response.json(
-      { error: "Provide a valid `url` (e.g. `stripe.com` or `https://stripe.com`)." },
-      { status: 400 },
-    );
-  }
-
-  //  Rate limiting (after URL validation so malformed requests don't
-  // burn a slot). Per-IP daily cap, configurable via
-  // RATE_LIMIT_PER_IP_PER_DAY env var (default 5). Auto-bypassed when
-  // NODE_ENV !== 'production' so local dev doesn't trip itself, and when
-  // ?key=<value> matches RATE_LIMIT_BYPASS_KEY for demos. See
-  // lib/rate-limit.ts for the full contract.
-  const bypassKey = new URL(req.url).searchParams.get("key");
-  const clientIp = getClientIp(req);
-  const rl = checkAndRecordRateLimit(clientIp, bypassKey);
-  if (!rl.allowed) {
-    return Response.json(
-      {
-        error: `Daily limit reached  ${rl.used} of ${rl.limit} extractions used in the last 24 hours. Try again ${rl.resetIn}.`,
-      },
-      {
-        status: 429,
-        headers: { "retry-after": String(rl.retryAfterSeconds) },
-      },
-    );
-  }
-
-  const slug = slugForOutput(url);
-  const outputDir = path.join(process.cwd(), "output", slug);
+  const owner = requestOwner(req);
+  if (!authorized(req) || !owner || !allowedOrigin(req)) return new Response("Forbidden", {status:403});
+  let body;
+  try { body = parseExtraction(await readSmallJson(req)); }
+  catch { return Response.json({error:"Invalid extraction request"},{status:400}); }
+  const url = body.url;
+  let job;
+  try { job = admit(owner); }
+  catch { return Response.json({error:"Storage unavailable"},{status:503}); }
+  if (!job) return Response.json({error:"Extraction capacity reached"},{status:429,headers:{"retry-after":"60"}});
+  const slug = job.id;
+  const outputDir = job.dir;
+  const abort = new AbortController();
+  const stop = () => abort.abort();
+  req.signal.addEventListener("abort",stop,{once:true});
+  if(req.signal.aborted) stop();
+  const deadline = setTimeout(stop, 240_000);
 
   // Seed extraUrls with high-value funnel pages that often carry component
   // variants the homepage doesn't show. `/pricing` is the most universal 
@@ -164,7 +132,7 @@ export async function POST(req: Request) {
   const options: ExtractOptions = {
     urls: [url],
     output: outputDir,
-    concurrency: 8,
+    concurrency: 2,
     // 8 pages matches the CLI default and gives the 4-layer stability
     // classifier enough cross-page evidence to separate L1 infrastructure
     // (everywhere) from L3 campaign (one-off banners). The previous
@@ -172,7 +140,7 @@ export async function POST(req: Request) {
     // small sites.
     maxPages: body.maxPages ?? 8,
     extraUrls,
-    noInteraction: body.noInteraction ?? false,
+    noInteraction: true,
     noDarkMode: body.noDarkMode ?? false,
     verbose: false,
   };
@@ -182,6 +150,7 @@ export async function POST(req: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      await withBrowserSignal(abort.signal, async () => {
       //  Tiny SSE writer 
       const sendEvent = (event: string, data: unknown) => {
         const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -208,6 +177,7 @@ export async function POST(req: Request) {
         label: string,
         fn: () => Promise<T> | T,
       ): Promise<{ ok: true; value: T } | { ok: false; error: string }> => {
+        abort.signal.throwIfAborted();
         const startKind = kind;
         const baseName = kind.replace(":start", "");
         const doneKind = `${baseName}:done` as StageKind;
@@ -217,6 +187,7 @@ export async function POST(req: Request) {
         const t0 = Date.now();
         try {
           const value = await fn();
+          abort.signal.throwIfAborted();
           sendEvent("stage", {
             kind: doneKind,
             label,
@@ -224,7 +195,7 @@ export async function POST(req: Request) {
           } satisfies StageEvent);
           return { ok: true, value };
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = "Extraction stage failed";
           sendEvent("stage", {
             kind: errorKind,
             label,
@@ -661,10 +632,12 @@ export async function POST(req: Request) {
         // client that ignored the streamed events still gets the full set.
         const diagnostics = [...earlyDiagnostics, ...lateDiagnostics];
 
+        abort.signal.throwIfAborted();
+        job.publish();
         const outputBase = `/api/output/${encodeURIComponent(slug)}`;
         sendEvent("result", {
           url,
-          outputDir: path.relative(process.cwd(), outputDir),
+          outputDir: slug,
           durationMs: Date.now() - overallStart,
           tokens,
           report,
@@ -690,7 +663,7 @@ export async function POST(req: Request) {
         // Last-resort catch: any unexpected throw inside the stage runner
         // pipeline. Stage-level errors are already handled inside runStage;
         // this catches the controller / encoder edge cases.
-        const message = err instanceof Error ? err.message : String(err);
+        const message = "Extraction stage failed";
         try {
           sendEvent("error", { message });
         } catch {
@@ -698,13 +671,18 @@ export async function POST(req: Request) {
         }
       } finally {
         clearInterval(heartbeat);
+        clearTimeout(deadline);
+        req.signal.removeEventListener("abort",stop);
+        job.release();
         try {
           controller.close();
         } catch {
           // Already closed.
         }
       }
+      });
     },
+    cancel() { stop(); },
   });
 
   return new Response(stream, {
