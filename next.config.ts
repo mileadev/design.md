@@ -17,6 +17,15 @@ import { resolve } from "node:path";
 const projectRoot = resolve(".");
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
+  async headers() {
+    return [{source: '/:path*', headers: [
+      {key:'X-Content-Type-Options',value:'nosniff'},
+      {key:'Referrer-Policy',value:'no-referrer'},
+      {key:'Permissions-Policy',value:'camera=(), microphone=(), geolocation=()'},
+      {key:'X-Frame-Options',value:'SAMEORIGIN'},
+    ]}];
+  },
   // Pin Turbopack to the project directory regardless of where pnpm-lock.yaml
   // files might exist in parent directories.
   turbopack: {
