@@ -97,16 +97,17 @@ interface StageEvent {
 export async function POST(req: Request) {
   const owner = requestOwner(req);
   if (!authorized(req) || !owner || !allowedOrigin(req)) return new Response("Forbidden", {status:403});
-  let body;
+  let body: ReturnType<typeof parseExtraction>;
   try { body = parseExtraction(await readSmallJson(req)); }
   catch { return Response.json({error:"Invalid extraction request"},{status:400}); }
   const url = body.url;
-  let job;
+  let job: ReturnType<typeof admit>;
   try { job = admit(owner); }
   catch { return Response.json({error:"Storage unavailable"},{status:503}); }
   if (!job) return Response.json({error:"Extraction capacity reached"},{status:429,headers:{"retry-after":"60"}});
-  const slug = job.id;
-  const outputDir = job.dir;
+  const admitted = job;
+  const slug = admitted.id;
+  const outputDir = admitted.dir;
   const abort = new AbortController();
   const stop = () => abort.abort();
   req.signal.addEventListener("abort",stop,{once:true});
@@ -290,7 +291,7 @@ export async function POST(req: Request) {
         } catch (err) {
           // Strip failure is non-fatal — tokens.json may just be larger.
           warnings.push(
-            `darkScreenshots strip skipped: ${err instanceof Error ? err.message : String(err)}`,
+            `darkScreenshots strip skipped: ${"Extraction failed"}`,
           );
         }
 
@@ -318,7 +319,7 @@ export async function POST(req: Request) {
           for (const d of earlyDiagnostics) sendEvent("diagnostic", d);
         } catch (err) {
           warnings.push(
-            `early diagnostics skipped: ${err instanceof Error ? err.message : String(err)}`,
+            `early diagnostics skipped: ${"Extraction failed"}`,
           );
         }
 
@@ -552,7 +553,7 @@ export async function POST(req: Request) {
         } catch (err) {
           sendEvent("error", {
             message: `Failed to read tokens.json: ${
-              err instanceof Error ? err.message : String(err)
+              "Extraction failed"
             }`,
           });
           return;
@@ -633,7 +634,7 @@ export async function POST(req: Request) {
         const diagnostics = [...earlyDiagnostics, ...lateDiagnostics];
 
         abort.signal.throwIfAborted();
-        job.publish();
+        admitted.publish();
         const outputBase = `/api/output/${encodeURIComponent(slug)}`;
         sendEvent("result", {
           url,
@@ -673,7 +674,7 @@ export async function POST(req: Request) {
         clearInterval(heartbeat);
         clearTimeout(deadline);
         req.signal.removeEventListener("abort",stop);
-        job.release();
+        admitted.release();
         try {
           controller.close();
         } catch {
