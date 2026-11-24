@@ -442,16 +442,7 @@ export function ExtractClient() {
     setStreamedDiagnostics([]);
 
     try {
-      // Forward the page's `?key=` query param to the API route so the
-      // owner can bypass their own rate limit by visiting the SPA with
-      // ?key=<RATE_LIMIT_BYPASS_KEY>. Anyone without the secret still
-      // hits the 5/IP/24h cap server-side.
-      const ownerKey = new URLSearchParams(window.location.search).get("key");
-      const apiUrl = ownerKey
-        ? `/api/extract?key=${encodeURIComponent(ownerKey)}`
-        : "/api/extract";
-
-      const res = await fetch(apiUrl, {
+      const res = await fetch("/api/extract", {
         // maxPages intentionally omitted  the API route's default is 8,
         // matching the CLI default. Hard-coding 5 here would silently
         // override that.
@@ -3596,7 +3587,7 @@ function ProofPreviewSection({ proofHtmlUrl }: { proofHtmlUrl: string }) {
           src={proofHtmlUrl}
           title="Pixel-fidelity proof"
           className="h-[820px] w-full border-0 bg-white"
-          sandbox="allow-scripts allow-same-origin"
+          sandbox=""
         />
       </div>
     </section>
@@ -4042,35 +4033,6 @@ function CopyInlineLink({
 // the Google Fonts CSS link. Web-safe stacks (Arial, Helvetica, Times, etc.)
 // are also implicitly skipped since the request just 404s for unknown
 // families and the browser falls back.
-const GENERIC_FONT_FAMILIES =
-  /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-(serif|sans-serif|monospace|rounded)|emoji|math|inherit|initial|unset|revert)$/i;
-
-// Build a single Google Fonts CSS URL for every family+weight pair in the
-// captured typography. Families that aren't on Google return 404 for that
-// segment but the rest still load — the browser handles partial failures
-// transparently.
-function buildGoogleFontsHref(
-  typography: NonNullable<ExtractResponse["tokens"]["typographyLevels"]>,
-): string | null {
-  const byFamily = new Map<string, Set<number>>();
-  for (const t of typography) {
-    const primary =
-      t.fontFamily.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") ?? "";
-    if (!primary) continue;
-    if (GENERIC_FONT_FAMILIES.test(primary)) continue;
-    const weight = Number(t.fontWeight);
-    if (!Number.isFinite(weight)) continue;
-    if (!byFamily.has(primary)) byFamily.set(primary, new Set());
-    byFamily.get(primary)!.add(weight);
-  }
-  if (byFamily.size === 0) return null;
-  const params = Array.from(byFamily.entries()).map(([family, weights]) => {
-    const ws = Array.from(weights).sort((a, b) => a - b).join(";");
-    return `family=${encodeURIComponent(family)}:wght@${ws}`;
-  });
-  return `https://fonts.googleapis.com/css2?${params.join("&")}&display=swap`;
-}
-
 // Typography list with progressive disclosure. Shows the top 3 tiers
 // (almost always the ones that matter) and tucks the rest behind a
 // "show all" toggle. Also injects a single Google Fonts stylesheet so
@@ -4083,21 +4045,7 @@ function TypographyList({
 }) {
   const [showAll, setShowAll] = useState(false);
 
-  useEffect(() => {
-    const href = buildGoogleFontsHref(typography);
-    if (!href) return;
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = href;
-    document.head.appendChild(link);
-    return () => {
-      try {
-        document.head.removeChild(link);
-      } catch {
-        // Element may have already been removed (e.g. fast remount).
-      }
-    };
-  }, [typography]);
+
 
   const TOP_VISIBLE = 3;
   const visible = showAll ? typography : typography.slice(0, TOP_VISIBLE);
