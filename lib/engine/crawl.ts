@@ -748,7 +748,7 @@ export async function crawlPages(
         await semaphore.acquire();
         try {
           await enforceDomainDelay(url, lastRequestByDomain);
-          return processPage(browser, url, opts.verbose, opts.waitFor);
+          return await processPage(browser, url, opts.verbose, opts.waitFor);
         } finally {
           semaphore.release();
         }
