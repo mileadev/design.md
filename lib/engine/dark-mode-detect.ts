@@ -116,7 +116,7 @@ async function detectMethod(
     return false;
   });
 
-  if (toggleFound) {
+  if (toggleFound && false) {
     return { method: 'toggle-button', switchAction: 'toggle-button' };
   }
 
@@ -165,7 +165,8 @@ async function switchToDarkMode(page: Page, action: DetectionResult['switchActio
 
       const target = (await toggle.count()) > 0 ? toggle : ariaToggle;
       if ((await target.count()) > 0) {
-        await target.click();
+        // Do not execute untrusted click handlers; rely on passive theme detection.
+        return;
       }
       break;
     }
