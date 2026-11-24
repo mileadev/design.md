@@ -8,7 +8,6 @@ import {
   type ComponentScreenshots,
 } from './component-screenshots';
 import { analyzeCSS } from './css-analyzer';
-import { captureInteractions } from './interaction-capture';
 import { detectDarkMode } from './dark-mode-detect';
 import { detectFramework } from './framework-detect';
 import { detectIcons } from './icon-detect';
@@ -297,14 +296,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
       }
 
       // Interaction capture
-      let interactions: InteractionData | undefined;
-      if (!options.noInteraction && false) {
-        try {
-          interactions = await captureInteractions(page);
-        } catch (err) {
-          log(options.verbose, `    Interaction capture failed: ${err}`);
-        }
-      }
+      const interactions: InteractionData | undefined = undefined;
 
       pageExtractions.push({
         url: pageData.url,
