@@ -97,29 +97,6 @@ async function detectMethod(
     return { method: attrResult.method, switchAction };
   }
 
-  // 3. Toggle button
-  const toggleFound = await page.evaluate(() => {
-    const pattern = /dark|theme|mode|light/i;
-    const candidates = document.querySelectorAll('button, [role="switch"], [role="button"], input[type="checkbox"]');
-
-    for (let i = 0; i < candidates.length; i++) {
-      const el = candidates[i];
-      const text = el.textContent?.trim() ?? '';
-      const ariaLabel = el.getAttribute('aria-label') ?? '';
-      const title = el.getAttribute('title') ?? '';
-
-      if (pattern.test(text) || pattern.test(ariaLabel) || pattern.test(title)) {
-        return true;
-      }
-    }
-
-    return false;
-  });
-
-  if (toggleFound && false) {
-    return { method: 'toggle-button', switchAction: 'toggle-button' };
-  }
-
   return null;
 }
 
@@ -150,26 +127,7 @@ async function switchToDarkMode(page: Page, action: DetectionResult['switchActio
       });
       break;
 
-    case 'toggle-button': {
-      const pattern = /dark|theme|mode|light/i;
-      const toggle = page.locator(
-        'button, [role="switch"], [role="button"], input[type="checkbox"]',
-      ).filter({
-        has: page.locator(':scope'),
-        hasText: pattern,
-      }).first();
-
-      const ariaToggle = page.locator(
-        '[aria-label*="dark" i], [aria-label*="theme" i], [aria-label*="mode" i], [aria-label*="light" i]',
-      ).first();
-
-      const target = (await toggle.count()) > 0 ? toggle : ariaToggle;
-      if ((await target.count()) > 0) {
-        // Do not execute untrusted click handlers; rely on passive theme detection.
-        return;
-      }
-      break;
-    }
+    case 'toggle-button': break;
   }
 
   await page.waitForTimeout(500);
