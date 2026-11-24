@@ -298,7 +298,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
 
       // Interaction capture
       let interactions: InteractionData | undefined;
-      if (!options.noInteraction && process.env.DESIGNMD_UNSAFE_INTERACTION === '1') {
+      if (!options.noInteraction && false) {
         try {
           interactions = await captureInteractions(page);
         } catch (err) {
