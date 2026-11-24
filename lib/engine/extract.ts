@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { launchSafeBrowser, safeContext } from './safe-browser';
 import * as fs from 'fs';
 import { crawlPages, type WaitStrategy } from './crawl';
 import { collectDOM } from './dom-collector';
@@ -237,14 +238,15 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
 
   log(options.verbose, 'Starting DOM collection and CSS analysis...');
 
-  const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: true });
-
+  const browser = await launchSafeBrowser();
   const pageExtractions: PageExtraction[] = [];
   let totalElements = 0;
+  let darkModeData: DarkModeData = { supported: false, detectionMethod: 'none', lightVariables: [], darkVariables: [], variableDiff: [], darkScreenshots: null };
+  let frameworkData: FrameworkDetection = { tailwind: null, uiFramework: null, designSystemUrl: null };
+  try {
 
   for (const pageData of crawlResult.pages) {
-    const context = await browser.newContext({
+    const context = await safeContext(browser, {
       viewport: { width: 1440, height: 900 },
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     });
@@ -296,7 +298,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
 
       // Interaction capture
       let interactions: InteractionData | undefined;
-      if (!options.noInteraction) {
+      if (!options.noInteraction && process.env.DESIGNMD_UNSAFE_INTERACTION === '1') {
         try {
           interactions = await captureInteractions(page);
         } catch (err) {
@@ -322,14 +324,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
 
   //  Step 7: Dark mode detection (multi-page fallback) 
 
-  let darkModeData: DarkModeData = {
-    supported: false,
-    detectionMethod: 'none',
-    lightVariables: [],
-    darkVariables: [],
-    variableDiff: [],
-    darkScreenshots: null,
-  };
+
 
   if (!options.noDarkMode && pageExtractions.length > 0) {
     log(options.verbose, 'Detecting dark mode...');
@@ -340,7 +335,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
       .filter((p) => p.css);
 
     for (const candidate of pagesToTry) {
-      const context = await browser.newContext({
+      const context = await safeContext(browser, {
         viewport: { width: 1440, height: 900 },
         userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
       });
@@ -380,11 +375,9 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
 
   //  Step 8: Framework detection (first page only) 
 
-  let frameworkData: FrameworkDetection = { tailwind: null, uiFramework: null, designSystemUrl: null };
-
   if (pageExtractions.length > 0) {
     log(options.verbose, 'Detecting frameworks...');
-    const context = await browser.newContext({
+    const context = await safeContext(browser, {
       viewport: { width: 1440, height: 900 },
     });
     const page = await context.newPage();
@@ -402,7 +395,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
     }
   }
 
-  await browser.close();
+  } finally { await browser.close(); }
 
   //  Step 9-11: Aggregate analysis 
 
@@ -523,9 +516,7 @@ async function extract(options: ExtractOptions): Promise<PageExtraction[]> {
   // container instance that later serves the file-fetch (compare against
   // the corresponding `[file-server 404]` line in app/api/output/[...path]).
   // K_REVISION is set by Cloud Run automatically; falsy on local dev.
-  console.log(
-    `[extract] wrote tokens.json: cwd=${process.cwd()} output=${options.output} K_REVISION=${process.env.K_REVISION ?? 'local'}`,
-  );
+  console.log('[extract] wrote tokens.json');
 
   // raw-data.json (full raw data for debugging)
   const rawData = {
