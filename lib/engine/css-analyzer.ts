@@ -50,9 +50,21 @@ async function fetchExternalSheet(
   // Try in-page fetch first (same-origin or CORS-allowed)
   const inPageResult = await page.evaluate(async (sheetUrl: string) => {
     try {
-      const res = await fetch(sheetUrl);
+      const res = await fetch(sheetUrl, { credentials: 'omit', signal: AbortSignal.timeout(10000) });
       if (!res.ok) return { css: null, error: `HTTP ${res.status}` };
-      return { css: await res.text(), error: null };
+      const length = Number(res.headers.get('content-length') || 0);
+      if (length > 2_000_000 || !res.body) return { css: null, error: 'Stylesheet too large' };
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let css = '', size = 0;
+      for (;;) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 2_000_000) { await reader.cancel(); return { css: null, error: 'Stylesheet too large' }; }
+        css += decoder.decode(value, {stream:true});
+      }
+      return { css: css + decoder.decode(), error: null };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       return { css: null, error: msg };
@@ -61,17 +73,7 @@ async function fetchExternalSheet(
 
   if (inPageResult.css !== null) return inPageResult;
 
-  // Fallback: fetch via Playwright's request context (bypasses CORS)
-  try {
-    const response = await page.context().request.get(url);
-    if (response.ok()) {
-      return { css: await response.text(), error: null };
-    }
-    return { css: null, error: `HTTP ${response.status()}` };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { css: null, error: msg };
-  }
+  return { css: null, error: 'Cross-origin stylesheet unavailable' };
 }
 
 function generateSelectorString(selectorList: csstree.CssNode): string {

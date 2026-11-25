@@ -21,3 +21,11 @@ MIRROR.md
 *.md
 !CLAUDE.md
 !SKILL.md
+
+.env
+.env.*
+**/.env
+**/.env.*
+.designmd-state
+**/*.pem
+**/*.key

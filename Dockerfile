@@ -24,7 +24,7 @@ WORKDIR /app
 # Install deps first — this layer caches as long as the manifests don't
 # change, so source-only edits don't trigger reinstall.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Build the Next.js app. The .next/ output bundles app/api/extract,
 # lib/engine/*, and components/* into .next/server/* and .next/static/*.
@@ -68,7 +68,10 @@ COPY --from=builder /app/public ./public
 
 # Writable output dir for extraction artifacts. Each request creates
 # output/<slug>/{tokens.json,screenshots/,DESIGN.md,preview.html,...}.
-RUN mkdir -p /app/output && chmod 777 /app/output
+COPY --from=builder /app/examples ./examples
+COPY --from=builder /app/eval/gold ./eval/gold
+RUN mkdir -p /app/output /app/.designmd-state /app/.next/cache && chown -R pwuser:pwuser /app/output /app/.designmd-state /app/.next/cache && chmod 700 /app/output /app/.designmd-state
+USER pwuser
 
 ENV NODE_ENV=production
 # Cloud Run injects PORT=8080 at runtime and routes to it. We set a default

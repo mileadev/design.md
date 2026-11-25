@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { chromium } from 'playwright';
+import { launchSafeBrowser, safeContext } from './safe-browser';
+
 // @ts-expect-error culori has no bundled declarations in this setup
 import * as culori from 'culori';
 import type { DesignTokens } from './types';
@@ -314,11 +315,12 @@ async function runProof(
 
   console.log(`  Palette: ${palette.length} colors`);
 
-  const browser = await chromium.launch();
+  const browser = await launchSafeBrowser();
+  try {
 
   // 1. Screenshot original site
   console.log(`  Capturing original: ${url}`);
-  const origCtx = await browser.newContext({
+  const origCtx = await safeContext(browser, {
     viewport: { width: 1440, height: 900 },
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
   });
@@ -425,14 +427,14 @@ async function runProof(
   // fail visibly faster on pages that can't render preview.html (font
   // resolution stalls, file:// URL malformed on Windows, Chromium
   // rejected the data: image inside, etc.).
-  const prevCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const prevCtx = await safeContext(browser, { viewport: { width: 1440, height: 900 } }, true);
   let prevB64: string;
   try {
     const prevPage = await prevCtx.newPage();
     // Local file:// — `load` is enough (no network to wait for); using
     // networkidle here was just a copy-paste artifact and could theoretically
     // hang if the preview HTML references blocked CDN fonts.
-    await prevPage.goto(`file://${path.resolve(resolvedPreview)}`, {
+    await prevPage.setContent(fs.readFileSync(resolvedPreview, 'utf-8'), {
       waitUntil: 'load',
       timeout: 15000,
     });
@@ -508,6 +510,7 @@ async function runProof(
   const outPath = path.join(outputDir, 'proof.html');
   fs.writeFileSync(outPath, html);
   console.log(`  Generated proof.html → ${outPath}`);
+  } finally { await browser.close().catch(() => undefined); }
 }
 
 //  CLI guard removed imported as a library from API routes 

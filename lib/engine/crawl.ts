@@ -1,4 +1,5 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
+import { launchSafeBrowser, safeContext, isHttpsUrl } from './safe-browser';
 import type { CrawlResult, PageData } from './types';
 
 //  Options 
@@ -307,7 +308,7 @@ async function discoverLinks(page: Page, domain: string): Promise<DiscoveredLink
       const parsed = new URL(href);
 
       // Same domain only
-      if (parsed.hostname !== domain) continue;
+      if (parsed.hostname !== domain || !isHttpsUrl(parsed.href)) continue;
 
       // Skip anchors, mailto, tel
       if (parsed.protocol === 'mailto:' || parsed.protocol === 'tel:') continue;
@@ -607,10 +608,10 @@ async function processPage(
   const start = Date.now();
   log(verbose, `START ${url}`);
 
-  const context = await browser.newContext({
+  const context = await safeContext(browser, {
     userAgent: USER_AGENT,
     viewport: { width: 1440, height: 900 },
-    ignoreHTTPSErrors: true,
+    ignoreHTTPSErrors: false,
   });
 
   const page = await context.newPage();
@@ -663,10 +664,10 @@ async function processPage(
     await scrollForLazyLoad(page);
 
     // Trigger dropdowns
-    const triggeredDropdowns = await triggerDropdowns(page);
+    const triggeredDropdowns: Awaited<ReturnType<typeof triggerDropdowns>> = [];
 
     // Trigger modals
-    const triggeredModals = await triggerModals(page);
+    const triggeredModals: Awaited<ReturnType<typeof triggerModals>> = [];
 
     // Get HTML after all interactions
     const html = await page.content();
@@ -706,14 +707,14 @@ export async function crawlPages(
   options?: Partial<CrawlOptions>,
 ): Promise<CrawlResult> {
   const opts: CrawlOptions = { ...DEFAULT_OPTIONS, ...options };
+  if (!Number.isInteger(opts.maxPages) || opts.maxPages < 1 || opts.maxPages > 8 || !Number.isInteger(opts.concurrency) || opts.concurrency < 1 || opts.concurrency > 8) throw new Error('Invalid crawl limits');
+  if (![...urls, ...(opts.extraUrls ?? [])].every(isHttpsUrl)) throw new Error('HTTPS destinations only');
   const totalStart = Date.now();
 
   const pages: PageData[] = [];
   const failedUrls: Array<{ url: string; reason: string }> = [];
 
-  const browser = await chromium.launch({
-    headless: true,
-  });
+  const browser = await launchSafeBrowser();
 
   const semaphore = new Semaphore(opts.concurrency);
   const lastRequestByDomain = new Map<string, number>();
@@ -743,11 +744,11 @@ export async function crawlPages(
 
     // Phase 1: Crawl initial URLs to discover links
     const discoveryResults = await Promise.all(
-      Array.from(initialUrls).map(async (url) => {
+      Array.from(initialUrls).slice(0, opts.maxPages).map(async (url) => {
         await semaphore.acquire();
         try {
           await enforceDomainDelay(url, lastRequestByDomain);
-          return processPage(browser, url, opts.verbose, opts.waitFor);
+          return await processPage(browser, url, opts.verbose, opts.waitFor);
         } finally {
           semaphore.release();
         }

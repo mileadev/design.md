@@ -46,3 +46,6 @@ next-env.d.ts
 /output/
 raw-data.json
 proof-data.json
+
+.designmd-state/
+!.env.example

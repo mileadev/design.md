@@ -77,7 +77,7 @@ function formatStyleDecls(style: Record<string, string> | null | undefined, inde
   if (!style) return '';
   const lines: string[] = [];
   for (const [key, value] of Object.entries(style)) {
-    if (value == null || value === '') continue;
+    if (value == null || value === '' || !/^[a-zA-Z][a-zA-Z0-9-]*$/.test(key) || /[<>;{}\\]|(?:url|image-set|expression)\s*\(/i.test(value)) continue;
     lines.push(`${indent}${camelToKebab(key)}: ${value};`);
   }
   return lines.join('\n');
